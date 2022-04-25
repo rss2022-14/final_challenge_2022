@@ -1,9 +1,10 @@
 #!/usr/bin/env python2
 
+from xmlrpc.client import boolean
 import rospy
 import numpy as np
 from rospy.numpy_msg import numpy_msg
-from sensor_msgs.msg import LaserScan
+from sensor_msgs.msg import LaserScan, Image
 from ackermann_msgs.msg import AckermannDriveStamped
 
 class StateMachine():
@@ -12,8 +13,14 @@ class StateMachine():
     stop_sign_location = None
     car_wash_seen = False
     car_wash_entrance = None
-    in_car_wash = False
+    entered_car_wash = False
+    exited_car_wash = False
+    stopped = False
+    stop_threshold_max = .75
+    stop_threshold_min = .50
 
+    line_follow_drive = None
+    wall_follow_drive = None
 
 
     def __init__(self):
@@ -23,29 +30,71 @@ class StateMachine():
         self.line_follower = LineFollower()
         self.line_follower = WallFollower()
 
+        #decide which drive commands to use
+        self.input_image_sub = rospy.Subscriber("images", Image, self.state_callback)
+        
+        #subscribe to line and wall followers
+        self.line_follower_sub = rospy.Subscriber("line_follwer", AckermannDriveStamped, self.line_callback)
+        self.wall_follower_sub = rospy.Subscriber("wall_follower", AckermannDriveStamped, self.wall_callback)
+    
+    def state_callback(self, msg):
+        # stop sign detection is back box ta code
+        # TODO: Change to use TA code
+        #get uv pixel -> homography -> compute distance
+        self.seen_stop_sign = staff_find_stop_sign("boolean")
+
+        if self.seen_stop_sign and not self.stopped:
+            self.stop_sign_location = staff_find_stop_sign("location")
+            if self.need_stop(self.stop_sign_location):
+                self.stopped = True
+                ackermann_drive = AckermannDriveStamped()
+                ackermann_drive.header.stamp = rospy.Time.now()
+                ackermann_drive.header.frame_id = "map"
+                ackermann_drive.drive.speed = 0
+                self.drive_pub.publish(ackermann_drive)
+
+            else:
+                self.drive_pub.publish(self.line_follow_drive)
+
+
+        #make function to determine when to enter the car wash
+        elif self.car_wash_seen and not self.exited_car_wash:
+            # consider leaving the carwash and refinding the line
+            # toggle safety controller to enter car wash
+            pass #TODO: fill in when adding car wash short cut
+
+        else: #default line following case
+            self.drive_pub.publish(self.line_follow_drive)
+
+
+        pass
+
+    def line_callback(self, msg):
+        self.line_follow_drive = msg
+
+    def wall_callback(self, msg):
+        self.wall_follow_drive = msg
+
+    def need_stop(self, pixel):
+        # pixel is stop sign location in x y
+        if np.sqrt(pixel.x**2+pixel.y**2) >= self.stop_threshold_min and np.sqrt(pixel.x**2+pixel.y**2) <= self.stop_threshold_max:
+            if not self.stopped:
+                return True
+        
+        elif self.stopped and np.sqrt(pixel.x**2+pixel.y**2) <= self.stop_threshold_min:
+            self.stopped = False
+            return False
+
+        return False
+
+
+    
 
 
 
-    # def callback(scan):
-    # pub = rospy.Publisher(rospy.get_param('publish_topic','open_space'), OpenSpace)
-    # distance = max(scan.ranges)
-    # index = scan.ranges.index(distance)
-    # angle = (index + 1) * scan.angle_increment + scan.angle_min if (index != len(scan.ranges) - 1) else scan.angle_max
 
-    # out = OpenSpace()
-    # out.angle = angle
-    # out.distance = distance
-
-    # rospy.loginfo(out)
-    # pub.publish(out)
-
-    # def listener():
-    # rospy.init_node('open_space_publisher')
-    # rospy.Subscriber(self.DRIVE_TOPIC, AckermannDriveStamped, callback)
-
-    # rospy.spin()
 
 if __name__ == '__main__':
-    rospy.init_node('saftey_controller')
-    safety_controller = SafetyController()
+    rospy.init_node('state_machine')
+    state_machine = StateMachine()
     rospy.spin()
