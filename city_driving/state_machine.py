@@ -3,6 +3,10 @@
 from xmlrpc.client import boolean
 import rospy
 import numpy as np
+from safety_controller import SafetyController
+from line_follower import LineFollower
+from wall_follower import WallFollower
+from std_msgs.msg import Float32MultiArray
 from rospy.numpy_msg import numpy_msg
 from sensor_msgs.msg import LaserScan, Image
 from ackermann_msgs.msg import AckermannDriveStamped
@@ -18,6 +22,8 @@ class StateMachine():
     stopped = False
     stop_threshold_max = .75
     stop_threshold_min = .50
+    current_stop_sign = None
+    last_stop_sign = None
 
     line_follow_drive = None
     wall_follow_drive = None
@@ -29,6 +35,7 @@ class StateMachine():
         #initalize line and wall followers
         self.line_follower = LineFollower()
         self.line_follower = WallFollower()
+        self.safety = SafetyController()
 
         #decide which drive commands to use
         self.input_image_sub = rospy.Subscriber("images", Image, self.state_callback)
@@ -36,11 +43,16 @@ class StateMachine():
         #subscribe to line and wall followers
         self.line_follower_sub = rospy.Subscriber("line_follwer", AckermannDriveStamped, self.line_callback)
         self.wall_follower_sub = rospy.Subscriber("wall_follower", AckermannDriveStamped, self.wall_callback)
+
+        #subscribe to stop signs 
+        self.stop_sign_sub = rospy.Subscriber("stop_sign_bbox", Float32MultiArray, self.stop_sign_callback)
     
     def state_callback(self, msg):
         # stop sign detection is back box ta code
         # TODO: Change to use TA code
         #get uv pixel -> homography -> compute distance
+
+
         self.seen_stop_sign = staff_find_stop_sign("boolean")
 
         if self.seen_stop_sign and not self.stopped:
@@ -73,6 +85,9 @@ class StateMachine():
         self.line_follow_drive = msg
 
     def wall_callback(self, msg):
+        self.wall_follow_drive = msg
+
+    def stop_sign_callback(self, msg):
         self.wall_follow_drive = msg
 
     def need_stop(self, pixel):
